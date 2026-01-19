@@ -1,5 +1,6 @@
 package com.tathang.example304.security.services;
 
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Service;
 
 import com.tathang.example304.model.Bill;
@@ -21,29 +22,43 @@ public class BillService {
         this.orderRepository = orderRepository;
     }
 
+    // ✅ CASH / MOMO
     public Bill createBill(Long orderId, Bill.PaymentMethod paymentMethod) {
+
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        billRepository.findByOrder_Id(orderId)
+                .ifPresent(b -> {
+                    throw new RuntimeException("Order đã có bill");
+                });
 
         Bill bill = new Bill(order, order.getTotalAmount());
         bill.setPaymentMethod(paymentMethod);
         bill.setPaymentStatus(Bill.PaymentStatus.COMPLETED);
         bill.setIssuedAt(LocalDateTime.now());
 
-        order.setStatus(Order.OrderStatus.CONFIRMED);
+        order.setStatus(Order.OrderStatus.PAID);
+        orderRepository.save(order);
 
         return billRepository.save(bill);
     }
 
-    public Bill updatePaymentStatus(Long billId, Bill.PaymentStatus paymentStatus) {
-        Bill bill = billRepository.findById(billId)
-                .orElseThrow(() -> new RuntimeException("Bill not found"));
-        bill.setPaymentStatus(paymentStatus);
+    // ✅ PAYOS – CHẶN TRÙNG
+    public Bill getPendingPayosBillByOrderId(Long orderId) {
+        return billRepository
+                .findByOrderIdAndPaymentMethodAndPaymentStatus(
+                        orderId,
+                        Bill.PaymentMethod.PAYOS,
+                        Bill.PaymentStatus.PENDING)
+                .orElse(null);
+    }
+
+    public Bill save(Bill bill) {
         return billRepository.save(bill);
     }
 
     public Bill getBillByOrderId(Long orderId) {
-        Optional<Bill> bill = billRepository.findByOrderId(orderId);
-        return bill.orElse(null);
+        return billRepository.findByOrder_Id(orderId).orElse(null);
     }
 }

@@ -1,22 +1,25 @@
 package com.tathang.example304.controllers;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import com.tathang.example304.model.*;
-import com.tathang.example304.payload.request.OrderItemRequest;
-import com.tathang.example304.payload.request.OrderRequest;
-import com.tathang.example304.payload.request.OrderStatusRequest;
+import com.tathang.example304.model.Order.OrderStatus;
 import com.tathang.example304.payload.request.PaymentRequest;
+import com.tathang.example304.repository.BillRepository;
+import com.tathang.example304.repository.OrderRepository;
 import com.tathang.example304.security.services.*;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/customer")
 @CrossOrigin(origins = "*", maxAge = 3600)
@@ -26,6 +29,14 @@ public class CustomerController {
     private final ProductService productService;
     private final BillService billService;
     private final UserService userService;
+    @Autowired
+    private PayOSService payOSService;
+
+    @Autowired
+    private BillRepository billRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
 
     public CustomerController(OrderService orderService, ProductService productService,
             BillService billService, UserService userService) {
@@ -292,6 +303,7 @@ public class CustomerController {
             List<OrderItem> orderItems = orderService.getOrderItemsByOrderId(orderId);
             BigDecimal totalAmount = orderItems.stream()
                     .map(OrderItem::getSubtotal)
+                    .filter(java.util.Objects::nonNull) // 🔥
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             updatedOrder.setTotalAmount(totalAmount);
@@ -419,57 +431,46 @@ public class CustomerController {
      * Tạo bill từ order (thanh toán)
      */
     @PostMapping("/orders/{orderId}/pay")
-    public ResponseEntity<?> createBill(
+    public ResponseEntity<?> payOrder(
             @PathVariable Long orderId,
             @RequestBody PaymentRequest paymentRequest,
             @AuthenticationPrincipal UserDetailsImpl userDetails) {
 
-        try {
-            System.out.println("💰 Creating bill for order: " + orderId);
-            System.out.println("   Payment method: " + paymentRequest.getPaymentMethod());
+        Order order = orderService.getOrderById(orderId);
 
-            // Kiểm tra order thuộc về user
-            Order order = orderService.getOrderById(orderId);
-            if (order == null || !order.getUser().getId().equals(userDetails.getId())) {
-                return ResponseEntity.status(403).body("Order not found or access denied");
-            }
+        if (order == null)
+            return ResponseEntity.notFound().build();
 
-            // Kiểm tra order status
-            if (order.getStatus() != Order.OrderStatus.CONFIRMED) {
-                return ResponseEntity.badRequest().body("Order must be confirmed before payment");
-            }
-
-            // Kiểm tra payment method
-            Bill.PaymentMethod paymentMethod;
-            try {
-                paymentMethod = Bill.PaymentMethod.valueOf(paymentRequest.getPaymentMethod().toUpperCase());
-            } catch (IllegalArgumentException e) {
-                return ResponseEntity.badRequest().body("Invalid payment method");
-            }
-
-            // Tạo bill
-            Bill bill = billService.createBill(orderId, paymentMethod);
-
-            // Cập nhật order status
-            order.setStatus(Order.OrderStatus.DELIVERED);
-            orderService.saveOrder(order);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Payment successful");
-            response.put("billId", bill.getId());
-            response.put("orderId", orderId);
-            response.put("totalAmount", bill.getTotalAmount());
-            response.put("paymentMethod", bill.getPaymentMethod());
-            response.put("paymentStatus", bill.getPaymentStatus());
-            response.put("issuedAt", bill.getIssuedAt());
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            System.out.println("❌ Error creating bill: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.badRequest().body("Failed to process payment: " + e.getMessage());
+        if (order.getStatus() != OrderStatus.PENDING) {
+            return ResponseEntity.ok(Map.of(
+                    "order", null,
+                    "items", List.of()));
         }
+
+        if ("PAYOS".equalsIgnoreCase(paymentRequest.getPaymentMethod())) {
+
+            String checkoutUrl = payOSService.createPaymentLink(
+                    order.getId(),
+                    order.getTotalAmount());
+
+            if (checkoutUrl == null) {
+                return ResponseEntity.status(500).body("Failed to create payment link");
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "paymentMethod", "PAYOS",
+                    "checkoutUrl", checkoutUrl));
+        }
+
+        // CASH / MOMO
+        Bill bill = billService.createBill(
+                orderId,
+                Bill.PaymentMethod.valueOf(paymentRequest.getPaymentMethod().toUpperCase()));
+
+        order.setStatus(Order.OrderStatus.PAID);
+        orderService.saveOrder(order);
+
+        return ResponseEntity.ok(bill);
     }
 
     /**
@@ -551,6 +552,36 @@ public class CustomerController {
             e.printStackTrace();
             return ResponseEntity.badRequest().body("Failed to calculate total");
         }
+
+    }
+
+    @PostMapping("/payos/webhook")
+    public ResponseEntity<?> handlePayOSWebhook(@RequestBody Map<String, Object> payload) {
+
+        log.info("🔔 PayOS webhook payload: {}", payload);
+
+        Map<String, Object> data = (Map<String, Object>) payload.get("data");
+
+        Long orderCode = Long.valueOf(data.get("orderCode").toString());
+        String status = data.get("status").toString();
+
+        Bill bill = billRepository.findByPayosOrderCode(orderCode)
+                .orElseThrow(() -> new RuntimeException("Bill not found"));
+
+        if ("PAID".equalsIgnoreCase(status)) {
+
+            bill.setPaymentStatus(Bill.PaymentStatus.COMPLETED);
+
+            Order order = bill.getOrder();
+            order.setStatus(Order.OrderStatus.PAID);
+
+            billRepository.save(bill);
+            orderRepository.save(order);
+
+            log.info("✅ Order {} marked as PAID", order.getId());
+        }
+
+        return ResponseEntity.ok(Map.of("success", true));
     }
 
     // DTO for order item request (giữ nguyên)
@@ -574,4 +605,5 @@ public class CustomerController {
             this.quantity = quantity;
         }
     }
+
 }

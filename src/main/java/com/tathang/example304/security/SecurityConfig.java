@@ -88,9 +88,15 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // === PUBLIC ENDPOINTS (Không cần authentication) ===
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/customer/**").permitAll() // 🆕 THÊM DÒNG NÀY!
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/forgot-password",
+                                "/api/auth/reset-password-otp")
+                        .permitAll()
+                        .requestMatchers("/api/auth/me").authenticated()
+                        .requestMatchers("/api/customer/**").authenticated()
+                        // .requestMatchers("/api/customer/**").permitAll()
+                        .requestMatchers("/api/customer/payos/webhook").permitAll()
                         .requestMatchers("/api/test/**").permitAll()
+                        .requestMatchers("/api/orders/**").authenticated()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/uploads/**").permitAll() // 🆕 Cho phép truy cập file upload
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()

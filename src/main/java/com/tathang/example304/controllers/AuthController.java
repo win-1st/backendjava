@@ -1,29 +1,37 @@
 package com.tathang.example304.controllers;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import com.tathang.example304.dto.LoginDto;
 import com.tathang.example304.dto.RegisterDto;
+import com.tathang.example304.payload.request.ResetPasswordOtpRequest;
+import com.tathang.example304.dto.UpdateProfileRequest;
 import com.tathang.example304.model.ERole;
 import com.tathang.example304.model.Role;
 import com.tathang.example304.model.User;
+import com.tathang.example304.model.ResetPasswordToken;
 import com.tathang.example304.payload.response.JwtResponse;
 import com.tathang.example304.repository.RoleRepository;
 import com.tathang.example304.repository.UserRepository;
+import com.tathang.example304.repository.ResetPasswordTokenRepository;
 import com.tathang.example304.security.jwt.JwtUtils;
 import com.tathang.example304.security.services.UserDetailsImpl;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.List;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -35,17 +43,28 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
     private final AuthenticationManager authenticationManager;
+    private final ResetPasswordTokenRepository resetTokenRepo;
+    private final JavaMailSender mailSender;
+    @Autowired
+    private UserRepository userRepo;
+
+    @Autowired
+    private ResetPasswordTokenRepository tokenRepo;
 
     public AuthController(UserRepository userRepository,
             RoleRepository roleRepository,
             PasswordEncoder passwordEncoder,
             JwtUtils jwtUtils,
-            AuthenticationManager authenticationManager) {
+            AuthenticationManager authenticationManager,
+            ResetPasswordTokenRepository resetTokenRepo,
+            JavaMailSender mailSender) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtils = jwtUtils;
         this.authenticationManager = authenticationManager;
+        this.resetTokenRepo = resetTokenRepo;
+        this.mailSender = mailSender;
     }
 
     // ✅ THÊM SLASH VÀO ĐẦU CÁC POST MAPPING
@@ -166,4 +185,103 @@ public class AuthController {
                     HttpStatus.UNAUTHORIZED);
         }
     }
+
+    @Transactional
+    @PostMapping("/forgot-password")
+    public ResponseEntity<?> forgotPassword(@RequestBody Map<String, String> body) {
+        String email = body.get("email");
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Email not found"));
+
+        String otp = String.valueOf(new Random().nextInt(900000) + 100000);
+
+        ResetPasswordToken token = tokenRepo.findByUser(user)
+                .orElse(new ResetPasswordToken());
+
+        token.setUser(user);
+        token.setToken(otp);
+        token.setExpiryDate(LocalDateTime.now().plusMinutes(5));
+        tokenRepo.save(token);
+
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(email);
+        message.setSubject("Mã OTP đặt lại mật khẩu");
+        message.setText("Mã OTP của bạn là: " + otp);
+
+        mailSender.send(message);
+        return ResponseEntity.ok("OTP sent");
+    }
+
+    @PostMapping("/reset-password-otp")
+    @Transactional
+    public ResponseEntity<?> resetPasswordOtp(
+            @RequestBody ResetPasswordOtpRequest request) {
+
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("Email không tồn tại"));
+
+        ResetPasswordToken token = resetTokenRepo.findByUser(user)
+                .orElseThrow(() -> new RuntimeException("OTP không tồn tại"));
+
+        if (!token.getToken().equals(request.getOtp())) {
+            return ResponseEntity.badRequest().body("OTP sai");
+        }
+
+        if (token.getExpiryDate().isBefore(LocalDateTime.now())) {
+            return ResponseEntity.badRequest().body("OTP đã hết hạn");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+        resetTokenRepo.delete(token);
+
+        return ResponseEntity.ok("Đổi mật khẩu thành công");
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser(Authentication authentication) {
+
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
+
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", user.getId());
+        response.put("username", user.getUsername());
+        response.put("email", user.getEmail());
+        response.put("fullName", user.getFullName());
+        response.put("imageUrl", user.getImageUrl()); // 🔥 BẮT BUỘC
+        response.put("phone", user.getPhone());
+        response.put("address", user.getAddress());
+        response.put("roles", user.getRoles().stream()
+                .map(r -> r.getName().name())
+                .toList());
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/me")
+    public ResponseEntity<?> updateProfile(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @RequestBody UpdateProfileRequest request) {
+
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        user.setFullName(request.getFullName());
+        user.setEmail(request.getEmail());
+        user.setPhone(request.getPhone());
+        user.setAddress(request.getAddress());
+        user.setImageUrl(request.getImageUrl()); // 🔥 LƯU ẢNH
+
+        userRepository.save(user);
+
+        return ResponseEntity.ok("Profile updated");
+    }
+
 }

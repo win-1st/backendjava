@@ -27,7 +27,8 @@ public class UserService {
     }
 
     public List<User> getAllStaffs() {
-        return userRepository.findByRolesNameIn(List.of(ERole.ROLE_USER, ERole.ROLE_USER));
+        return userRepository.findByRolesNameIn(
+                List.of(ERole.ROLE_USER, ERole.ROLE_ADMIN));
     }
 
     public User createStaff(String username, String email, String password, String fullName,

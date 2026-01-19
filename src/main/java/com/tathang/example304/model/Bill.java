@@ -42,8 +42,14 @@ public class Bill {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    @Column(name = "payos_order_code")
+    private Long payosOrderCode;
+
+    @Column(name = "checkout_url", length = 500)
+    private String checkoutUrl;
+
     public enum PaymentMethod {
-        CASH, MOMO, CREDIT
+        CASH, MOMO, PAYOS
     }
 
     public enum PaymentStatus {
@@ -62,6 +68,23 @@ public class Bill {
     }
 
     // Getters and Setters
+
+    public Long getPayosOrderCode() {
+        return payosOrderCode;
+    }
+
+    public void setPayosOrderCode(Long payosOrderCode) {
+        this.payosOrderCode = payosOrderCode;
+    }
+
+    public String getCheckoutUrl() {
+        return checkoutUrl;
+    }
+
+    public void setCheckoutUrl(String checkoutUrl) {
+        this.checkoutUrl = checkoutUrl;
+    }
+
     public Long getId() {
         return id;
     }
@@ -133,4 +156,5 @@ public class Bill {
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
     }
+
 }

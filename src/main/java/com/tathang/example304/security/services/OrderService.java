@@ -1,5 +1,6 @@
 package com.tathang.example304.security.services;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,38 +31,41 @@ public class OrderService {
     }
 
     public Order addItemToOrder(Long orderId, Long productId, Integer quantity) {
+
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
+
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found"));
 
-        // Kiểm tra tồn kho
         if (product.getStockQuantity() < quantity) {
             throw new RuntimeException("Insufficient stock");
         }
 
-        // Kiểm tra xem item đã tồn tại chưa
         List<OrderItem> existingItems = orderItemRepository.findByOrderId(orderId);
+
         Optional<OrderItem> existingItem = existingItems.stream()
-                .filter(item -> item.getProduct().getId().equals(productId))
+                .filter(item -> item.getProduct() != null &&
+                        item.getProduct().getId().equals(productId))
                 .findFirst();
 
         if (existingItem.isPresent()) {
-            // Cập nhật số lượng nếu đã tồn tại
             OrderItem item = existingItem.get();
+            item.setPrice(product.getPrice());
             item.setQuantity(item.getQuantity() + quantity);
             orderItemRepository.save(item);
         } else {
-            // Thêm mới nếu chưa tồn tại
-            OrderItem orderItem = new OrderItem(order, product, quantity, product.getPrice());
+            OrderItem orderItem = new OrderItem();
+            orderItem.setOrder(order); // 🔥 BẮT BUỘC
+            orderItem.setProduct(product); // 🔥 BẮT BUỘC
+            orderItem.setQuantity(quantity);
+            orderItem.setPrice(product.getPrice()); // 🔥 BẮT BUỘC
             orderItemRepository.save(orderItem);
         }
 
-        // Cập nhật tồn kho
         product.setStockQuantity(product.getStockQuantity() - quantity);
         productRepository.save(product);
 
-        // Cập nhật tổng tiền order
         updateOrderTotal(orderId);
 
         return orderRepository.findById(orderId).orElse(null);
@@ -154,7 +158,7 @@ public class OrderService {
     }
 
     public List<OrderItem> getOrderItemsByOrderId(Long orderId) {
-        return orderItemRepository.findByOrderId(orderId);
+        return orderItemRepository.findByOrderIdWithProduct(orderId);
     }
 
     public Order saveOrder(Order order) {
@@ -164,4 +168,11 @@ public class OrderService {
     public List<Order> getOrdersByUserId(Long userId) {
         return orderRepository.findByuserId(userId);
     }
+
+    public Order findById(Long id) {
+        return orderRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+    }
+
 }

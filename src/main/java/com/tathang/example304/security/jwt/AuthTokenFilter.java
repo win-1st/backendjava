@@ -34,23 +34,11 @@ public class AuthTokenFilter extends OncePerRequestFilter {
             FilterChain filterChain)
             throws ServletException, IOException {
 
-        String path = request.getServletPath();
-
-        // ✅ BỎ QUA JWT FILTER CHO API PUBLIC
-        if (path.startsWith("/api/auth")
-                || path.startsWith("/api/customer")
-                || path.startsWith("/uploads")
-                || path.startsWith("/swagger")
-                || path.startsWith("/v3/api-docs")) {
-
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         try {
             String jwt = parseJwt(request);
 
             if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
+
                 String username = jwtUtils.getUserNameFromJwtToken(jwt);
 
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
@@ -63,10 +51,12 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                 authentication.setDetails(
                         new WebAuthenticationDetailsSource().buildDetails(request));
 
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // 🔥 DÒNG QUYẾT ĐỊNH
+                SecurityContextHolder.getContext()
+                        .setAuthentication(authentication);
             }
         } catch (Exception e) {
-            logger.error("❌ JWT Filter error: {}", e.getMessage());
+            logger.error("JWT Filter error", e);
         }
 
         filterChain.doFilter(request, response);

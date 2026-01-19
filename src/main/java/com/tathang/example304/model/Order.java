@@ -5,6 +5,9 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "orders")
@@ -24,6 +27,10 @@ public class Order {
     @Column(name = "total_amount", precision = 10, scale = 2)
     private BigDecimal totalAmount;
 
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+
+    private List<OrderItem> items = new ArrayList<>();
+
     @ManyToOne
     @JoinColumn(name = "promotion_id")
     private Promotion promotion;
@@ -40,13 +47,12 @@ public class Order {
     private LocalDateTime updatedAt;
 
     public enum OrderStatus {
-        PENDING, // Đang chờ xử lý
-        CONFIRMED, // Đã xác nhận
-        PROCESSING, // Đang xử lý
-        SHIPPED, // Đã giao hàng
-        DELIVERED, // Đã giao thành công
-        CANCELLED, // Đã hủy
-        REFUNDED // Đã hoàn tiền
+        PENDING,
+        CONFIRMED,
+        PAID,
+        DELIVERING,
+        COMPLETED,
+        CANCELLED
     }
 
     // Constructors
@@ -66,21 +72,11 @@ public class Order {
         this.id = id;
     }
 
-    // Getters and Setters
     public User getUser() {
         return user;
     }
 
     public void setUser(User user) {
-        this.user = user;
-    }
-
-    // SỬA GETTER/SETTER CHO user
-    public User getuser() {
-        return user;
-    }
-
-    public void setuser(User user) {
         this.user = user;
     }
 
