@@ -35,11 +35,16 @@ public class BillService {
 
         Bill bill = new Bill(order, order.getTotalAmount());
         bill.setPaymentMethod(paymentMethod);
-        bill.setPaymentStatus(Bill.PaymentStatus.COMPLETED);
         bill.setIssuedAt(LocalDateTime.now());
 
-        order.setStatus(Order.OrderStatus.PAID);
-        orderRepository.save(order);
+        // 🔥 PHÂN BIỆT RÕ
+        if (paymentMethod == Bill.PaymentMethod.PAYOS) {
+            bill.setPaymentStatus(Bill.PaymentStatus.PENDING); // ⏳ chờ webhook
+        } else {
+            bill.setPaymentStatus(Bill.PaymentStatus.COMPLETED); // CASH / MOMO
+            order.setStatus(Order.OrderStatus.PAID);
+            orderRepository.save(order);
+        }
 
         return billRepository.save(bill);
     }

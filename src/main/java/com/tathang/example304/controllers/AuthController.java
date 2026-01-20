@@ -10,6 +10,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import com.tathang.example304.dto.ChangePasswordRequest;
 import com.tathang.example304.dto.LoginDto;
 import com.tathang.example304.dto.RegisterDto;
 import com.tathang.example304.payload.request.ResetPasswordOtpRequest;
@@ -284,4 +285,25 @@ public class AuthController {
         return ResponseEntity.ok("Profile updated");
     }
 
+    @PutMapping("/change-password")
+    public ResponseEntity<?> changePassword(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @RequestBody ChangePasswordRequest request) {
+
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // ❌ mật khẩu cũ sai
+        if (!passwordEncoder.matches(request.getOldPassword(), user.getPassword())) {
+            return ResponseEntity
+                    .badRequest()
+                    .body("Mật khẩu hiện tại không đúng");
+        }
+
+        // ✅ đổi mật khẩu
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        return ResponseEntity.ok("Đổi mật khẩu thành công");
+    }
 }

@@ -14,6 +14,7 @@ import com.tathang.example304.repository.OrderRepository;
 import com.tathang.example304.security.services.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,7 +105,7 @@ public class CustomerController {
 
             // Tạo order mới
             Order order = new Order(user);
-            order.setStatus(Order.OrderStatus.PENDING);
+            order.setStatus(Order.OrderStatus.NEW);
             order.setTotalAmount(BigDecimal.ZERO);
 
             // Lưu order
@@ -324,47 +325,6 @@ public class CustomerController {
     }
 
     /**
-     * Xác nhận order (chuyển sang trạng thái CONFIRMED)
-     */
-    @PostMapping("/orders/{orderId}/confirm")
-    public ResponseEntity<?> confirmOrder(
-            @PathVariable Long orderId,
-            @AuthenticationPrincipal UserDetailsImpl userDetails) {
-
-        try {
-            System.out.println("✅ Confirming order: " + orderId);
-
-            // Kiểm tra order thuộc về user
-            Order order = orderService.getOrderById(orderId);
-            if (order == null || !order.getUser().getId().equals(userDetails.getId())) {
-                return ResponseEntity.status(403).body("Order not found or access denied");
-            }
-
-            // Kiểm tra order có items không
-            List<OrderItem> orderItems = orderService.getOrderItemsByOrderId(orderId);
-            if (orderItems.isEmpty()) {
-                return ResponseEntity.badRequest().body("Order is empty");
-            }
-
-            // Cập nhật trạng thái
-            order.setStatus(Order.OrderStatus.CONFIRMED);
-            orderService.saveOrder(order);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Order confirmed successfully");
-            response.put("orderId", orderId);
-            response.put("status", Order.OrderStatus.CONFIRMED);
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            System.out.println("❌ Error confirming order: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.badRequest().body("Failed to confirm order: " + e.getMessage());
-        }
-    }
-
-    /**
      * Hủy order
      */
     @PostMapping("/orders/{orderId}/cancel")
@@ -441,27 +401,23 @@ public class CustomerController {
         if (order == null)
             return ResponseEntity.notFound().build();
 
-        if (order.getStatus() != OrderStatus.PENDING) {
-            return ResponseEntity.ok(Map.of(
-                    "order", null,
-                    "items", List.of()));
+        if (order.getStatus() != OrderStatus.NEW) {
+            return ResponseEntity.badRequest().body("Order is not payable");
         }
 
         if ("PAYOS".equalsIgnoreCase(paymentRequest.getPaymentMethod())) {
 
-            String checkoutUrl = payOSService.createPaymentLink(
-                    order.getId(),
-                    order.getTotalAmount());
+            // ❌ KHÔNG set PENDING ở đây
+            // ❌ KHÔNG tạo bill ở đây
 
-            if (checkoutUrl == null) {
-                return ResponseEntity.status(500).body("Failed to create payment link");
-            }
+            String checkoutUrl = payOSService.createPaymentLink(
+                    orderId,
+                    order.getTotalAmount());
 
             return ResponseEntity.ok(Map.of(
                     "paymentMethod", "PAYOS",
                     "checkoutUrl", checkoutUrl));
         }
-
         // CASH / MOMO
         Bill bill = billService.createBill(
                 orderId,
@@ -503,6 +459,26 @@ public class CustomerController {
             e.printStackTrace();
             return ResponseEntity.badRequest().body("Failed to get bill");
         }
+    }
+
+    @PostMapping("/orders/{orderId}/cancel-payment")
+    public ResponseEntity<?> cancelPayment(
+            @PathVariable Long orderId,
+            @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!order.getUser().getId().equals(userDetails.getId())) {
+            return ResponseEntity.status(403).build();
+        }
+
+        if (order.getStatus() == OrderStatus.PENDING) {
+            order.setStatus(OrderStatus.NEW);
+            orderRepository.save(order);
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Payment cancelled, order reset to NEW"));
     }
 
     /**
@@ -574,13 +550,12 @@ public class CustomerController {
 
             Order order = bill.getOrder();
             order.setStatus(Order.OrderStatus.PAID);
+            order.setUpdatedAt(LocalDateTime.now());
 
             billRepository.save(bill);
             orderRepository.save(order);
-
-            log.info("✅ Order {} marked as PAID", order.getId());
+            log.info("✅ PAYOS PAID → Order {} PAID", order.getId());
         }
-
         return ResponseEntity.ok(Map.of("success", true));
     }
 

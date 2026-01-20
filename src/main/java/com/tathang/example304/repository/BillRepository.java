@@ -29,4 +29,7 @@ public interface BillRepository extends JpaRepository<Bill, Long> {
             Bill.PaymentMethod paymentMethod,
             Bill.PaymentStatus paymentStatus);
 
+    void deleteByOrderIdAndPaymentMethod(
+            Long orderId,
+            Bill.PaymentMethod paymentMethod);
 }

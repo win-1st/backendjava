@@ -47,8 +47,8 @@ public class Order {
     private LocalDateTime updatedAt;
 
     public enum OrderStatus {
+        NEW,
         PENDING,
-        CONFIRMED,
         PAID,
         DELIVERING,
         COMPLETED,
@@ -61,7 +61,7 @@ public class Order {
 
     public Order(User user) {
         this.user = user;
-        this.status = OrderStatus.PENDING;
+        this.status = OrderStatus.NEW;
     }
 
     public Long getId() {

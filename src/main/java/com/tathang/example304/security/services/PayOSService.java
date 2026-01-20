@@ -47,19 +47,14 @@ public class PayOSService {
     public String createPaymentLink(Long orderId, BigDecimal totalAmount) {
 
         Order order = orderService.getOrderById(orderId);
-        if (order == null)
+        if (order == null) {
             throw new RuntimeException("Order not found");
-
-        Optional<Bill> existingBill = billRepository
-                .findByOrderIdAndPaymentMethodAndPaymentStatus(
-                        orderId,
-                        Bill.PaymentMethod.PAYOS,
-                        Bill.PaymentStatus.PENDING);
-
-        if (existingBill.isPresent()) {
-            log.warn("⚠️ PAYOS bill already exists for order {}", orderId);
-            return existingBill.get().getCheckoutUrl();
         }
+
+        // ✅ XÓA BILL PAYOS CŨ (nếu user hủy thanh toán)
+        billRepository.deleteByOrderIdAndPaymentMethod(
+                orderId,
+                Bill.PaymentMethod.PAYOS);
 
         long orderCode = System.currentTimeMillis();
         int amount = totalAmount.intValue();
@@ -95,26 +90,27 @@ public class PayOSService {
         headers.set("x-client-id", clientId);
         headers.set("x-api-key", apiKey);
 
-        ResponseEntity<Map> res = restTemplate.exchange(
+        ResponseEntity<Map> response = restTemplate.exchange(
                 PAYOS_API_URL,
                 HttpMethod.POST,
                 new HttpEntity<>(body, headers),
                 Map.class);
 
-        Map<String, Object> data = (Map<String, Object>) res.getBody().get("data");
+        Map<String, Object> data = (Map<String, Object>) response.getBody().get("data");
 
         String checkoutUrl = data.get("checkoutUrl").toString();
 
+        // ✅ CHỈ LƯU BILL – KHÔNG ĐỔI ORDER STATUS
         Bill bill = new Bill();
         bill.setOrder(order);
         bill.setPaymentMethod(Bill.PaymentMethod.PAYOS);
         bill.setPaymentStatus(Bill.PaymentStatus.PENDING);
         bill.setPayosOrderCode(orderCode);
-
-        // 🔥 FIX QUAN TRỌNG
         bill.setCheckoutUrl(checkoutUrl);
 
         billRepository.save(bill);
+
+        log.info("✅ PAYOS link created for order {}", orderId);
 
         return checkoutUrl;
     }
@@ -139,11 +135,12 @@ public class PayOSService {
                     "HmacSHA256"));
 
             byte[] hash = mac.doFinal(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder();
 
+            StringBuilder hex = new StringBuilder();
             for (byte b : hash) {
                 hex.append(String.format("%02x", b));
             }
+
             return hex.toString();
 
         } catch (Exception e) {
